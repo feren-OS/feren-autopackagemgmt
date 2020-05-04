@@ -1,0 +1,21 @@
+#!/bin/bash
+
+#Use workaround services since network-online fails at its job badly
+systemctl enable systemd-networkd.service systemd-networkd-wait-online.service
+
+#Enable the service so it can be there if needed
+systemctl enable feren-autopackagemgmt.service
+
+#Create needed dirs for the future
+if [ ! -d /etc/feren-autopackagemgmt ]; then
+    echo "Configuration Directory for Feren OS Autoinstall does not exist. Creating it..."
+    mkdir /etc/feren-autopackagemgmt
+fi
+if [ ! -f /etc/feren-autopackagemgmt/install ]; then
+    echo "Install Configuration File missing, creating it..."
+    touch /etc/feren-autopackagemgmt/install
+fi
+if [ ! -f /etc/feren-autopackagemgmt/remove ]; then
+    echo "Remove Configuration File missing, creating it..."
+    touch /etc/feren-autopackagemgmt/remove
+fi

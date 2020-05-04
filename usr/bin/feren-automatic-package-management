@@ -1,0 +1,174 @@
+#!/bin/bash
+red=`tput setaf 1`
+green=`tput setaf 2`
+reset=`tput sgr0`
+
+if [ ! "$(whoami)" = "root" ]; then
+    echo "${red}You are not running this as superuser. It will not work without root privelleges. Exiting.${reset}"
+    exit 1
+fi
+
+triedpackagesinst=""
+triedpackagesrm=""
+triedpackagesreinst=""
+
+if [ ! -d /etc/feren-autopackagemgmt ]; then
+    echo "Configuration Directory for Feren OS Autoinstall does not exist. Creating it..."
+    mkdir /etc/feren-autopackagemgmt
+fi
+if [ ! -f /etc/feren-autopackagemgmt/install ]; then
+    echo "Install Configuration File missing, creating it..."
+    touch /etc/feren-autopackagemgmt/install
+fi
+if [ ! -f /etc/feren-autopackagemgmt/remove ]; then
+    echo "Remove Configuration File missing, creating it..."
+    touch /etc/feren-autopackagemgmt/remove
+fi
+if [ ! -f /etc/feren-autopackagemgmt/reinstall ]; then
+    echo "Reinstall Configuration File missing, creating it..."
+    touch /etc/feren-autopackagemgmt/reinstall
+fi
+if [ ! -f /etc/feren-autopackagemgmt/markauto ]; then
+    echo "Mark as Automatically Installed Configuration File missing, creating it..."
+    touch /etc/feren-autopackagemgmt/markauto
+fi
+
+sed -i '/^$/d' /etc/feren-autopackagemgmt/install
+sed -i '/^$/d' /etc/feren-autopackagemgmt/remove
+sed -i '/^$/d' /etc/feren-autopackagemgmt/reinstall
+sed -i '/^$/d' /etc/feren-autopackagemgmt/markauto
+
+dpkg --configure -a
+
+packagestoinst="$(cat /etc/feren-autopackagemgmt/install)"
+packagestorm="$(cat /etc/feren-autopackagemgmt/remove)"
+packagestoreinst="$(cat /etc/feren-autopackagemgmt/reinstall)"
+packagestomarkauto="$(cat /etc/feren-autopackagemgmt/markauto)"
+
+if [ -z "$packagestoinst" ] && [ -z "$packagestorm" ] && [ -z "$packagestoreinst" ] && [ -z "$packagestomarkauto" ]; then
+    echo "Nothing to manage. Bye!"
+    exit 0
+fi
+
+while [ ! -z "$packagestoinst" ] || [ ! -z "$packagestorm" ] || [ ! -z "$packagestoreinst" ] || [ ! -z "$packagestomarkauto" ]; do
+
+triesforupdate=0
+while [ ! "$triesforupdate" -eq 4 ]; do
+echo "Waiting for package management to finish..."
+while fuser /var/lib/dpkg/lock >/dev/null 2>&1 ; do
+    :
+done
+apt update && triesforupdate=3
+triesforupdate=$(($triesforupdate+1))
+done
+
+for package in $packagestoinst; do
+    echo "Waiting for package management to finish..."
+    while fuser /var/lib/dpkg/lock >/dev/null 2>&1 ; do
+        :
+    done
+    echo "Installing $package..."
+    DEBIAN_FRONTEND='noninteractive' apt install -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" -yy -qq $package
+    if [ $? -eq 0 ]; then
+        linescounted=1
+        while read p; do
+            if [ "$p" = "$package" ]; then
+                sed -i "$linescounted"'s/'"$package"'//' /etc/feren-autopackagemgmt/install
+            fi
+            linescounted=$(($linescounted+1))
+        done </etc/feren-autopackagemgmt/install
+    fi
+    triedpackagesinst="$triedpackagesinst $package"
+done
+for package in $packagestorm; do
+    echo "Waiting for package management to finish..."
+    while fuser /var/lib/dpkg/lock >/dev/null 2>&1 ; do
+        :
+    done
+    echo "Removing $package..."
+    DEBIAN_FRONTEND='noninteractive' apt purge -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" -yy -qq $package
+    if [ $? -eq 0 ]; then
+        linescounted=1
+        while read p; do
+            if [ "$p" = "$package" ]; then
+                sed -i "$linescounted"'s/'"$package"'//' /etc/feren-autopackagemgmt/remove
+            fi
+            linescounted=$(($linescounted+1))
+        done </etc/feren-autopackagemgmt/remove
+    fi
+    triedpackagesrm="$triedpackagesrm
+$package"
+done
+for package in $packagestoreinst; do
+    echo "Waiting for package management to finish..."
+    while fuser /var/lib/dpkg/lock >/dev/null 2>&1 ; do
+        :
+    done
+    echo "Reinstalling $package..."
+    DEBIAN_FRONTEND='noninteractive' apt install --reinstall -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confnew" -yy -qq $package
+    if [ $? -eq 0 ]; then
+        linescounted=1
+        while read p; do
+            if [ "$p" = "$package" ]; then
+                sed -i "$linescounted"'s/'"$package"'//' /etc/feren-autopackagemgmt/reinstall
+            fi
+            linescounted=$(($linescounted+1))
+        done </etc/feren-autopackagemgmt/reinstall
+    fi
+    triedpackagesreinst="$triedpackagesreinst
+$package"
+done
+for package in $packagestomarkauto; do
+    echo "Waiting for package management to finish..."
+    while fuser /var/lib/dpkg/lock >/dev/null 2>&1 ; do
+        :
+    done
+    echo "Marking $package as automatically installed (removed during 'apt autoremove' if nothing depends on it)..."
+    apt-mark auto $package
+    linescounted=1
+    while read p; do
+        if [ "$p" = "$package" ]; then
+            sed -i "$linescounted"'s/'"$package"'//' /etc/feren-autopackagemgmt/markauto
+        fi
+        linescounted=$(($linescounted+1))
+    done </etc/feren-autopackagemgmt/markauto
+done
+
+packagestoinst="$(cat /etc/feren-autopackagemgmt/install)"
+packagestorm="$(cat /etc/feren-autopackagemgmt/remove)"
+packagestoreinst="$(cat /etc/feren-autopackagemgmt/reinstall)"
+packagestomarkauto="$(cat /etc/feren-autopackagemgmt/markauto)"
+for package in $triedpackagesinst; do
+    linescounted=1
+    while read p; do
+        if [ "$p" = "$package" ]; then
+            packagestoinst=$(echo "$packagestoinst" | sed "$linescounted"'s/'"$package"'//')
+        fi
+        linescounted=$(($linescounted+1))
+    done <<< "$packagestoinst"
+done
+for package in $triedpackagesrm; do
+    linescounted=1
+    while read p; do
+        if [ "$p" = "$package" ]; then
+            packagestorm=$(echo "$packagestorm" | sed "$linescounted"'s/'"$package"'//')
+        fi
+        linescounted=$(($linescounted+1))
+    done <<< "$packagestorm"
+done
+for package in $triedpackagesreinst; do
+    linescounted=1
+    while read p; do
+        if [ "$p" = "$package" ]; then
+            packagestoreinst=$(echo "$packagestoreinst" | sed "$linescounted"'s/'"$package"'//')
+        fi
+        linescounted=$(($linescounted+1))
+    done <<< "$packagestoreinst"
+done
+
+done
+sed -i '/^$/d' /etc/feren-autopackagemgmt/install
+sed -i '/^$/d' /etc/feren-autopackagemgmt/remove
+sed -i '/^$/d' /etc/feren-autopackagemgmt/reinstall
+sed -i '/^$/d' /etc/feren-autopackagemgmt/markauto
+exit 0

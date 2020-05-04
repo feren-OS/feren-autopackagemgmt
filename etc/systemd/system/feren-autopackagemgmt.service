@@ -1,0 +1,14 @@
+[Unit]
+Description=Automatic Feren OS Package Management
+ConditionFileIsExecutable=/usr/bin/feren-automatic-package-management
+After=systemd-networkd-wait-online.service
+Before=apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service
+Wants=systemd-networkd-wait-online.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/bin/feren-automatic-package-management
+TimeoutSec=30m
+
+[Install]
+WantedBy=basic.target
